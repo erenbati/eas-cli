@@ -1,0 +1,69 @@
+name: Refresh EAS PR 4395
+
+on:
+  push:
+    branches:
+      - ci/refresh-eas-4395
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout control branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild PR branch on current upstream main
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name "Eren Batı"
+          git config user.email "243848222+erenbati@users.noreply.github.com"
+
+          git remote add upstream https://github.com/expo/eas-cli.git || true
+          git fetch upstream main
+          git fetch origin fix/typescript-config-fallback
+
+          git switch -C rebuilt upstream/main
+
+          for path in             packages/eas-cli/src/build/validate.ts             packages/eas-cli/src/commands/update/index.ts             packages/eas-cli/src/project/ios/__tests__/exemptEncryption-test.ts             packages/eas-cli/src/project/publish.ts
+          do
+            git show origin/fix/typescript-config-fallback:"$path" > "$path"
+          done
+
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'packages/eas-cli/package.json';
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.dependencies['@expo/config'] = '56.0.14';
+          pkg.dependencies['@expo/config-plugins'] = '56.0.16';
+          pkg.dependencies['@expo/prebuild-config'] = '56.0.23';
+          fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+
+          corepack enable
+          yarn install --mode=update-lockfile
+          yarn install --immutable
+
+      - name: Validate refreshed branch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yarn workspace eas-cli typecheck
+          yarn fmt:check
+          yarn lint
+          yarn workspace eas-cli test --runInBand
+
+      - name: Commit and update PR branch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git status --short
+          git add             packages/eas-cli/package.json             packages/eas-cli/src/build/validate.ts             packages/eas-cli/src/commands/update/index.ts             packages/eas-cli/src/project/ios/__tests__/exemptEncryption-test.ts             packages/eas-cli/src/project/publish.ts             yarn.lock
+          git diff --cached --check
+          git commit -m "[eas-cli] Update bundled Expo config stack for TypeScript app configs"
+          git push --force origin HEAD:fix/typescript-config-fallback
