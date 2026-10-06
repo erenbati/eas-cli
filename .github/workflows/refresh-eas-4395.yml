@@ -53,6 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          yarn build
           yarn workspace eas-cli typecheck
           yarn fmt:check
           yarn lint
